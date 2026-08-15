@@ -1,0 +1,1238 @@
+---
+import palData from "../data/palworld-kb.json";
+
+type RawPal = {
+  number?: string;
+  elements?: string[];
+  work?: Record<string, number>;
+  rarity?: string;
+  hp?: number;
+  atk?: number;
+  def?: number;
+  mount?: string | null;
+  partner_skill?: string;
+  partner_effect?: string;
+  tier_hits?: string[];
+  nocturnal?: boolean;
+  size?: string;
+  get_via?: string[];
+};
+
+type Pal = {
+  id: string;
+  name: string;
+  number: string;
+  elements: string[];
+  work: Record<string, number>;
+  rarity: string;
+  hp: number;
+  atk: number;
+  def: number;
+  mount: string | null;
+  partnerSkill: string;
+  partnerEffect: string;
+  tierHits: string[];
+  nocturnal: boolean;
+  size: string;
+  obtainable: boolean;
+  score: number;
+};
+
+const rawPals = (palData as { pals: Record<string, RawPal> }).pals;
+
+const pals: Pal[] = Object.entries(rawPals)
+  .map(([name, pal]) => {
+    const getVia = pal.get_via ?? [];
+    const unavailable = getVia.some((entry) => /not obtainable|cannot be caught|cannot be bred/i.test(entry));
+    const score = (pal.hp ?? 0) + (pal.atk ?? 0) + (pal.def ?? 0);
+
+    return {
+      id: name.toLowerCase().replace(/[^a-z0-9]+/g, "-"),
+      name,
+      number: pal.number ?? "?",
+      elements: pal.elements ?? [],
+      work: pal.work ?? {},
+      rarity: pal.rarity ?? "Unknown",
+      hp: pal.hp ?? 0,
+      atk: pal.atk ?? 0,
+      def: pal.def ?? 0,
+      mount: pal.mount ?? null,
+      partnerSkill: pal.partner_skill || "Skill unknown",
+      partnerEffect: pal.partner_effect || "No details yet.",
+      tierHits: pal.tier_hits ?? [],
+      nocturnal: pal.nocturnal ?? false,
+      size: pal.size ?? "?",
+      obtainable: !unavailable,
+      score
+    };
+  })
+  .sort((a, b) => Number(a.number) - Number(b.number) || a.name.localeCompare(b.name));
+
+const elements = [...new Set(pals.flatMap((pal) => pal.elements))].sort();
+const workTypes = [...new Set(pals.flatMap((pal) => Object.keys(pal.work)))].sort();
+---
+
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="description" content="Herramienta fan no oficial para generar equipos aleatorios de Pals." />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <title>PalRoulette | Equipo aleatorio de Pals</title>
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="hero" aria-labelledby="page-title">
+        <div class="hero-copy">
+          <p class="eyebrow">Palworld team randomizer</p>
+          <h1 id="page-title">PalRoulette</h1>
+          <p class="intro">
+            Monta un equipo aleatorio de Pals con filtros por elemento, montura, combate o trabajo de base.
+            Ideal para runs caóticas, retos entre colegas o simplemente romper la parálisis de elegir siempre a los mismos.
+          </p>
+          <div class="stats-row" aria-label="Resumen de datos">
+            <span><strong>{pals.length}</strong> Pals</span>
+            <span><strong>{elements.length}</strong> elementos</span>
+            <span><strong>{workTypes.length}</strong> trabajos</span>
+          </div>
+        </div>
+
+        <div class="roulette-panel" aria-label="Ruleta de selección">
+          <div class="wheel-wrap">
+            <div class="wheel" id="wheel" aria-hidden="true">
+              <span>Fire</span>
+              <span>Water</span>
+              <span>Electric</span>
+              <span>Dark</span>
+              <span>Grass</span>
+              <span>Dragon</span>
+            </div>
+            <div class="pointer" aria-hidden="true"></div>
+          </div>
+          <div class="current-pick">
+            <span class="label">Último fichaje</span>
+            <strong id="current-pick">Pulsa girar</strong>
+          </div>
+        </div>
+      </section>
+
+      <section class="workspace" aria-label="Generador de equipo">
+        <form class="controls" id="controls">
+          <div class="control-field">
+            <label for="team-size">Tamaño</label>
+            <div class="stepper">
+              <button class="icon-button" type="button" data-step="-1" aria-label="Reducir tamaño">-</button>
+              <input id="team-size" name="team-size" type="number" min="1" max="50" value="5" />
+              <button class="icon-button" type="button" data-step="1" aria-label="Aumentar tamaño">+</button>
+            </div>
+          </div>
+
+          <div class="control-field">
+            <label for="element-filter">Elemento</label>
+            <span class="select-wrap">
+              <select id="element-filter" name="element">
+                <option value="all">Todos</option>
+                {elements.map((element) => <option value={element}>{element}</option>)}
+              </select>
+            </span>
+          </div>
+
+          <div class="control-field">
+            <label for="role-filter">Enfoque</label>
+            <span class="select-wrap">
+              <select id="role-filter" name="role">
+                <option value="all">Cualquier rol</option>
+                <option value="fighter">Combate alto</option>
+                <option value="worker">Base y trabajo</option>
+                <option value="mount">Monturas</option>
+                <option value="night">Nocturnos</option>
+              </select>
+            </span>
+          </div>
+
+          <label class="switch">
+            <input id="obtainable-only" type="checkbox" checked />
+            <span>Excluir no obtenibles</span>
+            <span class="info-popover">
+              <button type="button" class="info-button" aria-label="Qué significa excluir no obtenibles">?</button>
+              <span class="popover-content" role="tooltip">
+                Quita de la ruleta los Pals que el dataset marca como no capturables, no criables o no disponibles.
+              </span>
+            </span>
+          </label>
+
+          <label class="switch">
+            <input id="allow-duplicates" type="checkbox" />
+            <span>Permitir repetidos</span>
+          </label>
+
+          <button class="primary-action" type="submit">Girar equipo</button>
+        </form>
+
+        <div class="team-surface">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Equipo generado</p>
+              <h2>Huecos listos, cero dudas</h2>
+            </div>
+            <button class="secondary-action" id="copy-team" type="button">Copiar equipo</button>
+          </div>
+          <div class="team-grid" id="team-grid" aria-live="polite"></div>
+        </div>
+      </section>
+
+      <section class="source-note">
+        <p>
+          PalRoulette es una herramienta fan no oficial, creada para partidas y retos entre amigos. No está afiliada,
+          patrocinada ni aprobada por Pocketpair, Inc. Palworld y sus nombres relacionados pertenecen a sus respectivos
+          titulares.
+        </p>
+        <p>
+          Datos cargados desde un JSON local basado en
+          <a href="https://github.com/beliarance/palworld-kb/blob/main/data/index.json" rel="noreferrer">palworld-kb</a>.
+        </p>
+      </section>
+    </main>
+
+    <script id="pal-data" type="application/json" is:inline set:html={JSON.stringify(pals)}></script>
+    <script>
+      type Pal = {
+        id: string;
+        name: string;
+        number: string;
+        elements: string[];
+        work: Record<string, number>;
+        rarity: string;
+        hp: number;
+        atk: number;
+        def: number;
+        mount: string | null;
+        partnerSkill: string;
+        partnerEffect: string;
+        tierHits: string[];
+        nocturnal: boolean;
+        size: string;
+        obtainable: boolean;
+        score: number;
+      };
+
+      const palDataNode = document.querySelector<HTMLScriptElement>("#pal-data");
+      const pals: Pal[] = JSON.parse(palDataNode?.textContent ?? "[]");
+      const form = document.querySelector<HTMLFormElement>("#controls");
+      const teamSizeInput = document.querySelector<HTMLInputElement>("#team-size");
+      const elementFilter = document.querySelector<HTMLSelectElement>("#element-filter");
+      const roleFilter = document.querySelector<HTMLSelectElement>("#role-filter");
+      const obtainableOnly = document.querySelector<HTMLInputElement>("#obtainable-only");
+      const allowDuplicates = document.querySelector<HTMLInputElement>("#allow-duplicates");
+      const teamGrid = document.querySelector<HTMLElement>("#team-grid");
+      const currentPick = document.querySelector<HTMLElement>("#current-pick");
+      const wheel = document.querySelector<HTMLElement>("#wheel");
+      const copyButton = document.querySelector<HTMLButtonElement>("#copy-team");
+      const spinButton = document.querySelector<HTMLButtonElement>(".primary-action");
+      const stepButtons = document.querySelectorAll<HTMLButtonElement>("[data-step]");
+
+      let currentTeam: Pal[] = [];
+      let spinDegrees = 0;
+      let spinRun = 0;
+      let isSpinning = false;
+
+      const clampTeamSize = (value: number) => Math.max(1, Math.min(50, value));
+
+      const getPool = () => {
+        const element = elementFilter?.value ?? "all";
+        const role = roleFilter?.value ?? "all";
+        const mustBeObtainable = obtainableOnly?.checked ?? true;
+
+        return pals.filter((pal) => {
+          if (mustBeObtainable && !pal.obtainable) return false;
+          if (element !== "all" && !pal.elements.includes(element)) return false;
+          if (role === "fighter" && pal.score < 330 && !pal.tierHits.some((hit) => hit.startsWith("fighters"))) return false;
+          if (role === "worker" && Object.keys(pal.work).length === 0) return false;
+          if (role === "mount" && !pal.mount) return false;
+          if (role === "night" && !pal.nocturnal) return false;
+          return true;
+        });
+      };
+
+      const shuffle = <T,>(items: T[]) => {
+        const copy = [...items];
+        for (let i = copy.length - 1; i > 0; i -= 1) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [copy[i], copy[j]] = [copy[j], copy[i]];
+        }
+        return copy;
+      };
+
+      const escapeHTML = (value: string) =>
+        value.replace(/[&<>"']/g, (char) => ({
+          "&": "&amp;",
+          "<": "&lt;",
+          ">": "&gt;",
+          '"': "&quot;",
+          "'": "&#39;"
+        })[char] ?? char);
+
+      const pickTeam = (pool: Pal[], size: number) => {
+        if (pool.length === 0) return [];
+
+        if (allowDuplicates?.checked) {
+          return Array.from({ length: size }, () => pool[Math.floor(Math.random() * pool.length)]);
+        }
+
+        return shuffle(pool).slice(0, size);
+      };
+
+      const elementIcons: Record<string, string> = {
+        Dark: '<svg viewBox="0 0 24 24"><path d="M15.7 3.2a8.8 8.8 0 1 0 5.1 15.1 9.9 9.9 0 1 1-5.1-15.1Z"/></svg>',
+        Dragon: '<svg viewBox="0 0 24 24"><path d="M12 2 4 8.8l2.3 10.5L12 22l5.7-2.7L20 8.8 12 2Zm0 4.1 3.9 3.4-1.1 6.4L12 17.2l-2.8-1.3-1.1-6.4L12 6.1Z"/></svg>',
+        Electric: '<svg viewBox="0 0 24 24"><path d="M13.4 2 5 13.1h5.3L8.9 22 19 9.6h-5.5L13.4 2Z"/></svg>',
+        Fire: '<svg viewBox="0 0 24 24"><path d="M13.1 2.2c.9 3.6-.6 5-2 6.4-1.2 1.2-2.3 2.3-2.3 4.4 0 1.6 1.2 3.1 3.2 3.1 2.3 0 3.5-1.6 3.5-3.7 0-1.3-.5-2.6-1.5-4 3.3 1.7 5.2 4.3 5.2 7 0 3.7-2.8 6.6-7.1 6.6-4.2 0-7.1-2.8-7.1-6.7 0-2.9 1.5-5 3.4-6.8 1.8-1.7 4-3.2 4.7-6.3Z"/></svg>',
+        Grass: '<svg viewBox="0 0 24 24"><path d="M21.4 3.1C12.7 3.2 5 7.5 5 15.1c0 1.7.7 3.4 1.9 4.5C8.6 12.1 14 8 18.4 6.1c-3.6 2.9-6.1 6.4-7.5 10.7 1.2.3 2.6.1 3.9-.6 4.6-2.4 6.2-8.3 6.6-13.1Z"/></svg>',
+        Ground: '<svg viewBox="0 0 24 24"><path d="M12 3 2.6 12 12 21l9.4-9L12 3Zm0 4.3 5 4.7-5 4.7L7 12l5-4.7Z"/></svg>',
+        Ice: '<svg viewBox="0 0 24 24"><path d="m12 2 2.1 5.2L20 5l-2.2 5.9L23 13l-5.2 2.1L20 21l-5.9-2.2L12 24l-2.1-5.2L4 21l2.2-5.9L1 13l5.2-2.1L4 5l5.9 2.2L12 2Z"/></svg>',
+        Neutral: '<svg viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Zm0 4.2a4.8 4.8 0 1 1 0 9.6 4.8 4.8 0 0 1 0-9.6Z"/></svg>',
+        Water: '<svg viewBox="0 0 24 24"><path d="M12 2.4C8 7.3 5.8 10.9 5.8 14.1A6.2 6.2 0 0 0 12 20.4a6.2 6.2 0 0 0 6.2-6.3C18.2 10.9 16 7.3 12 2.4Z"/></svg>',
+        Unknown: '<svg viewBox="0 0 24 24"><path d="M10.3 15.8h3.2v-2.1c2.2-.7 3.7-2.1 3.7-4.5 0-3-2.3-5-5.6-5-2 0-3.8.7-5.1 2l1.9 2.4c.8-.8 1.8-1.3 3-1.3 1.4 0 2.3.7 2.3 1.9 0 1.3-1 2-3.4 2.5v4.1Zm-.1 4.5h3.5v-3.2h-3.5v3.2Z"/></svg>'
+      };
+
+      const workIcons: Record<string, string> = {
+        Cooling: elementIcons.Ice,
+        Farming: '<svg viewBox="0 0 24 24"><path d="M5 20h14v-3H5v3Zm2-4h2V7H7v9Zm4 0h2V4h-2v12Zm4 0h2V9h-2v7Z"/></svg>',
+        Gathering: '<svg viewBox="0 0 24 24"><path d="M7 3h3v9H7V3Zm4 0h3v9h-3V3Zm4 2h3v8.5c0 4-2.6 7.5-6 7.5s-6-3.5-6-7.5V8h3v5.2c0 1.8 1.2 3.3 3 3.3s3-1.5 3-3.3V5Z"/></svg>',
+        Generating_Electricity: elementIcons.Electric,
+        Handiwork: '<svg viewBox="0 0 24 24"><path d="m5.2 18.8 7.7-7.7-2-2 2.2-2.2 1.7 1.7 2.6-2.6L21 9.6l-2.6 2.6 1.7 1.7-2.2 2.2-2-2-7.7 7.7-3-3Z"/></svg>',
+        Kindling: elementIcons.Fire,
+        Lumbering: '<svg viewBox="0 0 24 24"><path d="m4 19 9.4-9.4-2.2-2.2L14 4.6l5.4 5.4-2.8 2.8-2.2-2.2L5 20l-1-1Z"/></svg>',
+        Medicine: '<svg viewBox="0 0 24 24"><path d="M10 3h4v6h6v4h-6v8h-4v-8H4V9h6V3Z"/></svg>',
+        Mining: '<svg viewBox="0 0 24 24"><path d="M14.7 3.2c2.2.4 4.1 1.4 5.8 3l-2.1 2.1c-1.1-.9-2.2-1.5-3.4-1.8L6.5 21 3 17.5 14.7 3.2Z"/></svg>',
+        Planting: '<svg viewBox="0 0 24 24"><path d="M11 21h2v-7.3c3.8-.4 6.4-3 7-7.7-4.8.4-7.5 2.8-8 6.2C11.3 9 8.7 6.9 4 6.5c.4 4.5 3 6.9 7 7.2V21Z"/></svg>',
+        Transporting: '<svg viewBox="0 0 24 24"><path d="M3 7.5 12 3l9 4.5v9L12 21l-9-4.5v-9Zm9 1.7 4.7-2.3L12 4.7 7.3 6.9 12 9.2Zm1 9.3 6-3v-5.8l-6 3v5.8Z"/></svg>',
+        Watering: elementIcons.Water
+      };
+
+      const formatWorkName = (work: string) => work.replaceAll("_", " ");
+
+      const renderWorkChips = (pal: Pal) => {
+        const entries = Object.entries(pal.work).sort((a, b) => b[1] - a[1]);
+        if (entries.length === 0) return '<p class="work-empty">Sin trabajo de base destacado</p>';
+
+        return `
+          <div class="work-chips" aria-label="Aptitudes de trabajo">
+            ${entries
+              .slice(0, 4)
+              .map(([work, level]) => `
+                <span class="work-chip">
+                  <span class="chip-icon" aria-hidden="true">${workIcons[work] ?? elementIcons.Unknown}</span>
+                  <span>${escapeHTML(formatWorkName(work))}</span>
+                  <strong>${level}</strong>
+                </span>
+              `)
+              .join("")}
+          </div>
+        `;
+      };
+
+      const renderTeam = () => {
+        if (!teamGrid) return;
+
+        if (currentTeam.length === 0) {
+          teamGrid.innerHTML = isSpinning
+            ? '<p class="empty-state">La ruleta está buscando el primer Pal...</p>'
+            : '<p class="empty-state">No hay Pals para esos filtros. Abre un poco la jaula de criterios.</p>';
+          return;
+        }
+
+        teamGrid.innerHTML = currentTeam
+          .map((pal, index) => {
+            const elements = pal.elements.length ? pal.elements : ["Unknown"];
+            const chips = elements
+              .map((element) => `
+                <span class="element-chip" data-element="${escapeHTML(element)}">
+                  <span class="chip-icon" aria-hidden="true">${elementIcons[element] ?? elementIcons.Unknown}</span>
+                  <span>${escapeHTML(element)}</span>
+                </span>
+              `)
+              .join("");
+            return `
+              <article class="pal-card">
+                <div class="pal-topline">
+                  <span>#${escapeHTML(pal.number)}</span>
+                  <button type="button" class="reroll-button" data-reroll="${index}" aria-label="Regenerar ${escapeHTML(pal.name)}">↻</button>
+                </div>
+                <h3>${escapeHTML(pal.name)}</h3>
+                <div class="chip-row">${chips}</div>
+                ${renderWorkChips(pal)}
+                <p class="skill-line"><strong>${escapeHTML(pal.partnerSkill)}</strong> ${escapeHTML(pal.partnerEffect)}</p>
+              </article>
+            `;
+          })
+          .join("");
+      };
+
+      const spinWheel = (picked?: Pal) => {
+        if (!wheel) return;
+        spinDegrees += 720 + Math.floor(Math.random() * 540);
+        wheel.style.transform = `rotate(${spinDegrees}deg)`;
+        if (picked && currentPick) currentPick.textContent = picked.name;
+      };
+
+      const generateTeam = () => {
+        spinRun += 1;
+        const runId = spinRun;
+        const size = clampTeamSize(Number(teamSizeInput?.value ?? 6));
+        const picks = pickTeam(getPool(), size);
+        if (teamSizeInput) teamSizeInput.value = String(size);
+
+        currentTeam = [];
+        isSpinning = picks.length > 0;
+        renderTeam();
+        if (picks.length === 0) return;
+
+        if (spinButton) {
+          spinButton.disabled = true;
+          spinButton.textContent = "Girando...";
+        }
+
+        picks.forEach((pal, index) => {
+          window.setTimeout(() => {
+            if (runId !== spinRun) return;
+            currentTeam.push(pal);
+            renderTeam();
+            spinWheel(pal);
+
+            if (index === picks.length - 1) {
+              isSpinning = false;
+              if (spinButton) {
+                spinButton.disabled = false;
+                spinButton.textContent = "Girar equipo";
+              }
+            }
+          }, index * 720);
+        });
+      };
+
+      const rerollAt = (index: number) => {
+        if (isSpinning) return;
+        const pool = getPool().filter((pal) => allowDuplicates?.checked || !currentTeam.some((teamPal, teamIndex) => teamIndex !== index && teamPal.id === pal.id));
+        const next = shuffle(pool)[0];
+        if (!next) return;
+        currentTeam[index] = next;
+        renderTeam();
+        spinWheel(next);
+      };
+
+      form?.addEventListener("submit", (event) => {
+        event.preventDefault();
+        generateTeam();
+      });
+
+      teamGrid?.addEventListener("click", (event) => {
+        const target = event.target as HTMLElement;
+        const button = target.closest<HTMLButtonElement>("[data-reroll]");
+        if (!button) return;
+        rerollAt(Number(button.dataset.reroll));
+      });
+
+      stepButtons.forEach((button) => {
+        button.addEventListener("click", () => {
+          if (!teamSizeInput) return;
+          const step = Number(button.dataset.step ?? 0);
+          teamSizeInput.value = String(clampTeamSize(Number(teamSizeInput.value) + step));
+        });
+      });
+
+      copyButton?.addEventListener("click", async () => {
+        if (isSpinning) return;
+        const text = currentTeam.map((pal, index) => `${index + 1}. ${pal.name}`).join("\n");
+        if (!text) return;
+        await navigator.clipboard.writeText(text);
+        copyButton.textContent = "Copiado";
+        window.setTimeout(() => {
+          copyButton.textContent = "Copiar equipo";
+        }, 1200);
+      });
+
+      generateTeam();
+    </script>
+  </body>
+</html>
+
+<style>
+  :root {
+    color-scheme: dark;
+    --ink: #f8fbff;
+    --muted: #a9b4c4;
+    --panel: #17202a;
+    --panel-strong: #202b37;
+    --line: #314050;
+    --yellow: #ffd166;
+    --cyan: #4cc9f0;
+    --green: #79d45e;
+    --red: #ff6b6b;
+    --violet: #a98bff;
+    --dark: #0d1117;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  body {
+    min-width: 320px;
+    margin: 0;
+    font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    color: var(--ink);
+    background:
+      radial-gradient(circle at 20% 10%, rgba(76, 201, 240, 0.18), transparent 28rem),
+      linear-gradient(135deg, #0d1117 0%, #18212a 48%, #101820 100%);
+  }
+
+  button,
+  input,
+  select {
+    font: inherit;
+  }
+
+  button {
+    cursor: pointer;
+  }
+
+  a {
+    color: var(--cyan);
+  }
+
+  .app-shell {
+    width: min(1180px, calc(100% - 32px));
+    margin: 0 auto;
+    padding: 28px 0 36px;
+  }
+
+  .hero {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(320px, 430px);
+    gap: clamp(28px, 4vw, 56px);
+    align-items: center;
+    padding: 18px 0 36px;
+  }
+
+  .hero-copy {
+    max-width: 720px;
+  }
+
+  .eyebrow {
+    margin: 0 0 10px;
+    color: var(--yellow);
+    font-size: 0.78rem;
+    font-weight: 800;
+    letter-spacing: 0;
+    text-transform: uppercase;
+  }
+
+  h2,
+  h3,
+  p {
+    overflow-wrap: anywhere;
+  }
+
+  h1 {
+    margin: 0;
+    max-width: 100%;
+    font-size: clamp(4rem, 8.7vw, 7rem);
+    line-height: 0.9;
+    letter-spacing: 0;
+    overflow-wrap: normal;
+    white-space: nowrap;
+  }
+
+  .intro {
+    max-width: 660px;
+    margin: 28px 0 0;
+    color: var(--muted);
+    font-size: clamp(1.02rem, 2vw, 1.24rem);
+    line-height: 1.65;
+  }
+
+  .stats-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-top: 28px;
+  }
+
+  .stats-row span {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 8px;
+    min-height: 42px;
+    padding: 9px 13px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: rgba(23, 32, 42, 0.72);
+    color: var(--muted);
+  }
+
+  .stats-row strong {
+    color: var(--ink);
+    font-size: 1.18rem;
+  }
+
+  .roulette-panel {
+    display: grid;
+    gap: 20px;
+    justify-items: center;
+    padding: 24px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: rgba(16, 24, 32, 0.78);
+    box-shadow: 0 24px 80px rgba(0, 0, 0, 0.28);
+  }
+
+  .wheel-wrap {
+    position: relative;
+    width: min(74vw, 350px);
+    aspect-ratio: 1;
+    display: grid;
+    place-items: center;
+  }
+
+  .wheel {
+    width: 100%;
+    height: 100%;
+    position: relative;
+    border: 10px solid #f9f7f3;
+    border-radius: 50%;
+    background: conic-gradient(
+      var(--yellow) 0deg 60deg,
+      var(--cyan) 60deg 120deg,
+      var(--green) 120deg 180deg,
+      var(--red) 180deg 240deg,
+      var(--violet) 240deg 300deg,
+      #f9f7f3 300deg 360deg
+    );
+    box-shadow: inset 0 0 0 8px rgba(13, 17, 23, 0.22), 0 20px 48px rgba(0, 0, 0, 0.32);
+    transition: transform 1s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .wheel::after {
+    content: "";
+    position: absolute;
+    inset: 38%;
+    border: 7px solid #f9f7f3;
+    border-radius: 50%;
+    background: var(--dark);
+  }
+
+  .wheel span {
+    position: absolute;
+    inset: 17% auto auto 50%;
+    width: 86px;
+    margin-left: -43px;
+    color: var(--dark);
+    font-size: 0.72rem;
+    font-weight: 900;
+    text-align: center;
+    transform-origin: 43px 114px;
+  }
+
+  .wheel span:nth-child(1) { transform: rotate(30deg); }
+  .wheel span:nth-child(2) { transform: rotate(90deg); }
+  .wheel span:nth-child(3) { transform: rotate(150deg); }
+  .wheel span:nth-child(4) { transform: rotate(210deg); }
+  .wheel span:nth-child(5) { transform: rotate(270deg); }
+  .wheel span:nth-child(6) { transform: rotate(330deg); }
+
+  .pointer {
+    position: absolute;
+    top: -4px;
+    width: 34px;
+    height: 46px;
+    clip-path: polygon(50% 100%, 0 0, 100% 0);
+    background: var(--ink);
+    filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.35));
+  }
+
+  .current-pick {
+    width: 100%;
+    min-height: 76px;
+    display: grid;
+    gap: 4px;
+    align-content: center;
+    padding: 14px 16px;
+    border-radius: 8px;
+    background: var(--panel-strong);
+    text-align: center;
+  }
+
+  .label {
+    color: var(--muted);
+    font-size: 0.8rem;
+  }
+
+  .current-pick strong {
+    font-size: 1.4rem;
+  }
+
+  .workspace {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 22px;
+    align-items: start;
+    margin-top: 0;
+  }
+
+  .controls,
+  .team-surface {
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: rgba(23, 32, 42, 0.92);
+  }
+
+  .controls {
+    display: grid;
+    grid-template-columns: minmax(160px, 220px) minmax(170px, 1fr) minmax(190px, 1fr) minmax(190px, max-content) minmax(170px, max-content) minmax(160px, 190px);
+    gap: 18px;
+    align-items: end;
+    padding: 18px;
+  }
+
+  .control-field {
+    display: grid;
+    gap: 8px;
+  }
+
+  label {
+    color: var(--muted);
+    font-size: 0.86rem;
+    font-weight: 700;
+  }
+
+  input,
+  select {
+    width: 100%;
+    min-height: 44px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 0 12px;
+    color: var(--ink);
+    background: #101820;
+  }
+
+  select {
+    appearance: none;
+    padding-right: 42px;
+  }
+
+  .select-wrap {
+    position: relative;
+    display: block;
+  }
+
+  .select-wrap::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    right: 16px;
+    width: 8px;
+    height: 8px;
+    border-right: 2px solid var(--ink);
+    border-bottom: 2px solid var(--ink);
+    pointer-events: none;
+    transform: translateY(-65%) rotate(45deg);
+  }
+
+  .stepper {
+    display: grid;
+    grid-template-columns: 44px 1fr 44px;
+    gap: 8px;
+  }
+
+  .icon-button,
+  .reroll-button {
+    width: 44px;
+    height: 44px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    color: var(--ink);
+    background: #101820;
+    font-weight: 900;
+  }
+
+  .switch {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 44px;
+    padding: 0;
+  }
+
+  .switch input {
+    width: 20px;
+    min-height: 20px;
+    accent-color: var(--green);
+  }
+
+  .info-popover {
+    position: relative;
+    display: inline-grid;
+    place-items: center;
+  }
+
+  .info-button {
+    width: 24px;
+    height: 24px;
+    border: 1px solid var(--line);
+    border-radius: 50%;
+    color: var(--ink);
+    background: #101820;
+    font-size: 0.78rem;
+    font-weight: 900;
+    line-height: 1;
+  }
+
+  .popover-content {
+    position: absolute;
+    left: 50%;
+    bottom: calc(100% + 10px);
+    z-index: 5;
+    width: min(260px, calc(100vw - 48px));
+    padding: 10px 12px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    color: var(--ink);
+    background: #0d1117;
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.34);
+    font-size: 0.82rem;
+    font-weight: 600;
+    line-height: 1.45;
+    opacity: 0;
+    pointer-events: none;
+    transform: translate(-50%, 4px);
+    transition: opacity 0.16s ease, transform 0.16s ease;
+  }
+
+  .popover-content::after {
+    content: "";
+    position: absolute;
+    left: 50%;
+    top: 100%;
+    width: 10px;
+    height: 10px;
+    border-right: 1px solid var(--line);
+    border-bottom: 1px solid var(--line);
+    background: #0d1117;
+    transform: translate(-50%, -5px) rotate(45deg);
+  }
+
+  .info-popover:hover .popover-content,
+  .info-popover:focus-within .popover-content {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+
+  .primary-action,
+  .secondary-action {
+    min-height: 46px;
+    border: 0;
+    border-radius: 8px;
+    font-weight: 900;
+  }
+
+  .primary-action {
+    justify-self: end;
+    width: 100%;
+    color: var(--dark);
+    background: var(--yellow);
+  }
+
+  .primary-action:disabled {
+    cursor: wait;
+    opacity: 0.72;
+  }
+
+  .secondary-action {
+    padding: 0 14px;
+    color: var(--ink);
+    background: #263341;
+  }
+
+  .team-surface {
+    padding: 18px;
+  }
+
+  .section-heading {
+    display: flex;
+    gap: 16px;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+  }
+
+  h2 {
+    margin: 0;
+    font-size: clamp(1.45rem, 3vw, 2rem);
+    letter-spacing: 0;
+  }
+
+  .team-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 14px;
+  }
+
+  .pal-card {
+    min-height: 250px;
+    display: grid;
+    align-content: start;
+    gap: 12px;
+    padding: 14px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: #101820;
+  }
+
+  .pal-topline {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    color: var(--muted);
+  }
+
+  .pal-card h3 {
+    min-height: 58px;
+    margin: 0;
+    font-size: 1.56rem;
+    line-height: 1.08;
+    letter-spacing: 0;
+  }
+
+  .chip-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 7px;
+  }
+
+  .element-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 28px;
+    padding: 5px 9px;
+    border-radius: 999px;
+    color: var(--dark);
+    background: var(--cyan);
+    font-size: 0.74rem;
+    font-weight: 900;
+  }
+
+  .element-chip[data-element="Fire"] { background: var(--red); }
+  .element-chip[data-element="Water"] { background: var(--cyan); }
+  .element-chip[data-element="Grass"] { background: var(--green); }
+  .element-chip[data-element="Electric"] { background: var(--yellow); }
+  .element-chip[data-element="Dark"] { background: var(--violet); color: var(--ink); }
+  .element-chip[data-element="Dragon"] { background: #ff9f43; }
+  .element-chip[data-element="Ground"] { background: #d0a15b; }
+  .element-chip[data-element="Ice"] { background: #b8f3ff; }
+  .element-chip[data-element="Neutral"] { background: #f9f7f3; }
+
+  .chip-icon {
+    width: 1.15em;
+    height: 1.15em;
+    display: inline-grid;
+    place-items: center;
+    flex: 0 0 auto;
+    line-height: 1;
+  }
+
+  .chip-icon svg {
+    width: 100%;
+    height: 100%;
+    display: block;
+    fill: currentColor;
+  }
+
+  .work-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 7px;
+  }
+
+  .work-chip {
+    min-height: 30px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    max-width: 100%;
+    padding: 6px 9px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    color: var(--ink);
+    background: var(--panel);
+    font-size: 0.78rem;
+    font-weight: 800;
+  }
+
+  .work-chip span:nth-child(2) {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .work-chip strong {
+    min-width: 20px;
+    min-height: 20px;
+    display: inline-grid;
+    place-items: center;
+    border-radius: 999px;
+    color: var(--dark);
+    background: var(--yellow);
+    font-size: 0.72rem;
+  }
+
+  .work-line,
+  .work-empty,
+  .skill-line {
+    margin: 0;
+    color: var(--muted);
+    font-size: 0.88rem;
+    line-height: 1.45;
+  }
+
+  .skill-line strong {
+    color: var(--ink);
+  }
+
+  .empty-state {
+    grid-column: 1 / -1;
+    min-height: 140px;
+    display: grid;
+    place-items: center;
+    margin: 0;
+    border: 1px dashed var(--line);
+    border-radius: 8px;
+    color: var(--muted);
+    text-align: center;
+  }
+
+  .source-note {
+    display: grid;
+    gap: 8px;
+    margin-top: 18px;
+    color: var(--muted);
+    font-size: 0.9rem;
+  }
+
+  .source-note p {
+    margin: 0;
+  }
+
+  code {
+    color: var(--ink);
+  }
+
+  @media (max-width: 860px) {
+    .hero,
+    .workspace {
+      grid-template-columns: 1fr;
+    }
+
+    .hero {
+      padding-top: 10px;
+    }
+
+    .controls {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .primary-action {
+      grid-column: 2;
+    }
+
+    .team-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+
+  @media (max-width: 560px) {
+    .app-shell {
+      width: min(100% - 22px, 1180px);
+      padding-top: 14px;
+    }
+
+    h1 {
+      font-size: clamp(2.9rem, 15.2vw, 5rem);
+    }
+
+    .roulette-panel,
+    .controls,
+    .team-surface {
+      padding: 14px;
+    }
+
+    .section-heading {
+      display: grid;
+      align-items: start;
+    }
+
+    .secondary-action {
+      width: 100%;
+    }
+
+    .controls,
+    .team-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .primary-action {
+      grid-column: auto;
+      justify-self: stretch;
+    }
+  }
+</style>
+
+<style is:global>
+  .pal-card {
+    min-height: 250px;
+    display: grid;
+    align-content: start;
+    gap: 12px;
+    padding: 14px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: #101820;
+  }
+
+  .pal-topline {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    color: var(--muted);
+  }
+
+  .reroll-button {
+    width: 44px;
+    height: 44px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    color: var(--ink);
+    background: #101820;
+    font-weight: 900;
+  }
+
+  .pal-card h3 {
+    min-height: 58px;
+    margin: 0;
+    font-size: 1.56rem;
+    line-height: 1.08;
+    letter-spacing: 0;
+  }
+
+  .chip-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 7px;
+  }
+
+  .element-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 28px;
+    padding: 5px 9px;
+    border-radius: 999px;
+    color: var(--dark);
+    background: var(--cyan);
+    font-size: 0.74rem;
+    font-weight: 900;
+  }
+
+  .element-chip[data-element="Fire"] { background: var(--red); }
+  .element-chip[data-element="Water"] { background: var(--cyan); }
+  .element-chip[data-element="Grass"] { background: var(--green); }
+  .element-chip[data-element="Electric"] { background: var(--yellow); }
+  .element-chip[data-element="Dark"] { background: var(--violet); color: var(--ink); }
+  .element-chip[data-element="Dragon"] { background: #ff9f43; }
+  .element-chip[data-element="Ground"] { background: #d0a15b; }
+  .element-chip[data-element="Ice"] { background: #b8f3ff; }
+  .element-chip[data-element="Neutral"] { background: #f9f7f3; }
+
+  .chip-icon {
+    width: 1.15em;
+    height: 1.15em;
+    display: inline-grid;
+    place-items: center;
+    flex: 0 0 auto;
+    line-height: 1;
+  }
+
+  .chip-icon svg {
+    width: 100%;
+    height: 100%;
+    display: block;
+    fill: currentColor;
+  }
+
+  .work-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 7px;
+  }
+
+  .work-chip {
+    min-height: 30px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    max-width: 100%;
+    padding: 6px 9px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    color: var(--ink);
+    background: var(--panel);
+    font-size: 0.78rem;
+    font-weight: 800;
+  }
+
+  .work-chip span:nth-child(2) {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .work-chip strong {
+    min-width: 20px;
+    min-height: 20px;
+    display: inline-grid;
+    place-items: center;
+    border-radius: 999px;
+    color: var(--dark);
+    background: var(--yellow);
+    font-size: 0.72rem;
+  }
+
+  .work-line,
+  .work-empty,
+  .skill-line {
+    margin: 0;
+    color: var(--muted);
+    font-size: 0.88rem;
+    line-height: 1.45;
+  }
+
+  .skill-line strong {
+    color: var(--ink);
+  }
+
+  .empty-state {
+    grid-column: 1 / -1;
+    min-height: 140px;
+    display: grid;
+    place-items: center;
+    margin: 0;
+    border: 1px dashed var(--line);
+    border-radius: 8px;
+    color: var(--muted);
+    text-align: center;
+  }
+</style>
